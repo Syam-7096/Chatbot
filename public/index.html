@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Visitor Chat Widget</title>
+  <!-- Floating Chat Widget -->
+<style>
+  #chat-btn {
+    position: fixed;
+    bottom: 25px;
+    right: 25px;
+    width: 55px;
+    height: 55px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #007bff, #00c6ff);
+    color: #fff;
+    font-size: 24px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    z-index: 1000;
+  }
+  #chat-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+  }
+
+  #chat-box {
+    position: fixed;
+    bottom: 95px;
+    right: 25px;
+    width: 320px;
+    max-height: 430px;
+    display: none;
+    flex-direction: column;
+    border-radius: 15px;
+    background: #fff;
+    box-shadow: 0 4px 25px rgba(0,0,0,0.2);
+    overflow: hidden;
+    animation: slideUp 0.35s ease;
+    z-index: 999;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  #chat-header {
+    background: linear-gradient(135deg, #007bff, #00c6ff);
+    color: #fff;
+    padding: 12px 15px;
+    font-weight: 600;
+    font-size: 15px;
+    text-align: center;
+  }
+
+  #messages {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #f5f5f5;
+  }
+
+  .msg {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #007bff, #00c6ff);
+    color: #fff;
+    border-bottom-right-radius: 2px;
+  }
+
+  .msg.owner {
+    align-self: flex-start;
+    background: #e4e6eb;
+    color: #000;
+    border-bottom-left-radius: 2px;
+  }
+
+  .time {
+    display: block;
+    font-size: 10px;
+    color: #999;
+    margin-top: 2px;
+    text-align: right;
+  }
+
+  #typing {
+    font-size: 12px;
+    color: #888;
+    padding: 5px 10px;
+    display: none;
+  }
+
+  #chat-input {
+    display: flex;
+    border-top: 1px solid #ddd;
+    padding: 8px;
+    background: #fff;
+  }
+
+  #msg {
+    flex: 1;
+    padding: 8px;
+    border-radius: 20px;
+    border: 1px solid #ccc;
+    outline: none;
+  }
+
+  #send {
+    background: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    margin-left: 8px;
+    cursor: pointer;
+    font-size: 16px;
+  }
+</style>
+
+
+<body>
+    <!-- Chat UI -->
+<button id="chat-btn">💬</button>
+
+<div id="chat-box">
+  <div id="chat-header">💬 Chat with Support</div>
+  <div id="messages"></div>
+  <div id="typing">Owner is typing...</div>
+  <div id="chat-input">
+    <input id="msg" placeholder="Type a message..." />
+    <button id="send">➤</button>
+  </div>
+</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const chatBtn = document.getElementById('chat-btn');
+  const chatBox = document.getElementById('chat-box');
+  const messages = document.getElementById('messages');
+  const input = document.getElementById('msg');
+  const sendBtn = document.getElementById('send');
+  const typingEl = document.getElementById('typing');
+
+  let sessionId = localStorage.getItem('sessionId') || null;
+  let chatOpen = false;
+
+  // Toggle floating chat box
+  chatBtn.onclick = () => {
+    chatOpen = !chatOpen;
+    chatBox.style.display = chatOpen ? 'flex' : 'none';
+  };
+
+  // Send stored sessionId (if any)
+  socket.emit('init', { sessionId });
+
+  // When server confirms or assigns a session
+  socket.on('session', (data) => {
+    sessionId = data.sessionId;
+    localStorage.setItem('sessionId', sessionId);
+    // Request chat history
+    socket.emit('requestHistory', { sessionId });
+  });
+
+  // Load previous messages from DB
+  socket.on('history', (data) => {
+    if (!data || data.sessionId !== sessionId) return;
+    messages.innerHTML = "";
+    data.messages.forEach((m) => addMsg(m.sender, m.message, m.time));
+    messages.scrollTop = messages.scrollHeight;
+  });
+
+  // Show new incoming messages (Owner → Visitor)
+  socket.on('chatMessage', (data) => {
+    if (data.sessionId !== sessionId) return;
+    addMsg(data.sender, data.message, data.time);
+    typingEl.style.display = 'none';
+  });
+
+  // Typing indicator (Owner typing)
+  socket.on('typing', (data) => {
+    if (data.sessionId !== sessionId) return;
+    if (data.sender === 'Owner') {
+      typingEl.style.display = 'block';
+      clearTimeout(window._t);
+      window._t = setTimeout(() => (typingEl.style.display = 'none'), 1200);
+    }
+  });
+
+  // Add message bubble
+  function addMsg(sender, text, time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + (sender === 'User' ? 'user' : 'owner');
+    d.innerHTML = `<div>${text}</div><div class="time">${time}</div>`;
+    messages.appendChild(d);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  // Send message
+  sendBtn.onclick = sendMessage;
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+    socket.emit('typing', { sessionId, sender: 'User' });
+  });
+
+  function sendMessage() {
+    const txt = input.value.trim();
+    if (!txt) return;
+    socket.emit('chatMessage', { sessionId, message: txt });
+    addMsg('User', txt);
+    input.value = '';
+  }
+</script>
+
+</body>
+</html>

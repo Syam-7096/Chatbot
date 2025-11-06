@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Owner Dashboard</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      background: #f2f3f5;
+    }
+
+    #sidebar {
+      width: 300px;
+      background: #fff;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #sidebar h2 {
+      background: linear-gradient(135deg, #007bff, #00c6ff);
+      color: #fff;
+      padding: 15px;
+      margin: 0;
+      text-align: center;
+      font-size: 16px;
+    }
+
+    #userList {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+    }
+
+    .user-item {
+      background: #f9f9f9;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      position: relative;
+      transition: 0.2s;
+    }
+
+    .user-item:hover {
+      background: #eef4ff;
+    }
+
+    .user-item.active {
+      background: #e6f0ff;
+      border-left: 4px solid #007bff;
+    }
+
+    .user-item .name {
+      font-weight: 600;
+      color: #333;
+    }
+
+    .user-item .last {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .unread {
+      background: red;
+      color: #fff;
+      font-size: 11px;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: absolute;
+      top: 10px;
+      right: 10px;
+    }
+
+    #chatArea {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chatHeader {
+      padding: 12px 20px;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      font-weight: 600;
+    }
+
+    #messages {
+      flex: 1;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+      background: #fafafa;
+    }
+
+    .msg {
+      max-width: 70%;
+      padding: 8px 12px;
+      border-radius: 14px;
+      line-height: 1.4;
+      position: relative;
+    }
+
+    .msg .time {
+      font-size: 10px;
+      color: #999;
+      margin-top: 2px;
+      text-align: right;
+    }
+
+    .user {
+      align-self: flex-start;
+      background: #e4e6eb;
+    }
+
+    .owner {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #007bff, #00c6ff);
+      color: #fff;
+    }
+
+    #inputArea {
+      display: flex;
+      background: #fff;
+      border-top: 1px solid #ddd;
+      padding: 10px;
+    }
+
+    #messageInput {
+      flex: 1;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      padding: 10px;
+      outline: none;
+    }
+
+    #sendBtn {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+      margin-left: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h2>Owner Dashboard</h2>
+    <div id="userList"></div>
+  </div>
+
+  <div id="chatArea">
+    <div id="chatHeader">Select a user to chat</div>
+    <div id="messages"></div>
+    <div id="inputArea">
+      <input id="messageInput" placeholder="Type a reply..." />
+      <button id="sendBtn">➤</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const userListEl = document.getElementById("userList");
+    const messagesEl = document.getElementById("messages");
+    const inputEl = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const chatHeader = document.getElementById("chatHeader");
+
+    let currentSession = null;
+    let sessions = {};
+
+    socket.emit("ownerJoin");
+
+    socket.on("userList", (list) => {
+      userListEl.innerHTML = "";
+      if (!list.length) {
+        userListEl.innerHTML = "<div style='color:#888;padding:10px;'>No visitors yet</div>";
+        return;
+      }
+
+      list.forEach((s) => {
+        const div = document.createElement("div");
+        div.className = "user-item";
+        div.dataset.sid = s.sessionId;
+
+        div.innerHTML = `
+          <div class="name">${s.name}</div>
+          <div class="last">${s.lastMessage ? s.lastMessage.message.slice(0, 40) : "No messages yet"}</div>
+          ${s.unreadCount > 0 ? `<div class="unread">${s.unreadCount}</div>` : ""}
+        `;
+
+        div.onclick = () => selectUser(s.sessionId);
+        userListEl.appendChild(div);
+      });
+    });
+
+    function selectUser(id) {
+      currentSession = id;
+      document.querySelectorAll(".user-item").forEach((el) => el.classList.remove("active"));
+      const selected = document.querySelector(`[data-sid="${id}"]`);
+      if (selected) selected.classList.add("active");
+      chatHeader.textContent = "Chat with " + id;
+      socket.emit("requestHistory", { sessionId: id });
+      socket.emit("markSeen", { sessionId: id });
+    }
+
+    socket.on("history", (data) => {
+      if (!data || data.sessionId !== currentSession) return;
+      messagesEl.innerHTML = "";
+      data.messages.forEach((m) => addMsg(m.sender, m.message, m.time));
+    });
+
+    socket.on("chatMessage", (data) => {
+      if (!data.sessionId) return;
+      if (data.sessionId === currentSession) {
+        addMsg(data.sender, data.message, data.time);
+      }
+    });
+
+    socket.on("seenUpdate", data => {
+        if (data.sessionId === currentSession) {
+            document.querySelectorAll(".owner .time span").forEach(s => s.style.color = "#2196f3");
+        }
+    });
+
+
+    function addMsg(sender, msg, time, status="") {
+        const div = document.createElement("div");
+        div.className = "msg " + (sender === "Owner" ? "owner" : "user");
+        const tickColor = status === "seen" ? "#2196f3" : "#999";
+        const tickIcon = status === "sent" ? "✔️" : "✔✔";
+        const ticks = sender === "Owner" ? `<span style="font-size:11px;color:${tickColor}">${tickIcon}</span>` : "";
+        div.innerHTML = `<div>${msg}</div><div class="time">${time} ${ticks}</div>`;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+
+    sendBtn.onclick = sendMessage;
+    inputEl.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+
+    function sendMessage() {
+      const txt = inputEl.value.trim();
+      if (!txt || !currentSession) return;
+      socket.emit("ownerMessage", { sessionId: currentSession, message: txt });
+      addMsg("Owner", txt, new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      inputEl.value = "";
+    }
+
+    let pageHidden = false;
+    let blinkInterval = null;
+    const originalTitle = document.title;
+
+    // play sound
+    const notifSound = new Audio("/notify.mp3");
+
+    // detect tab visibility
+    document.addEventListener("visibilitychange", () => {
+    pageHidden = document.hidden;
+    if (!pageHidden && blinkInterval) {
+        clearInterval(blinkInterval);
+        document.title = originalTitle;
+    }
+    });
+
+    // play + blink when new msg arrives
+    function notifyNewMessage() {
+    notifSound.play().catch(() => {}); // ignore autoplay block
+    if (pageHidden) {
+        let visible = false;
+        blinkInterval = setInterval(() => {
+        document.title = visible ? "💬 New message!" : originalTitle;
+        visible = !visible;
+        }, 1000);
+    }
+    }
+
+    // when receiving new message
+    socket.on("chatMessage", (data) => {
+    if (data.sessionId === currentSession) {
+        addMsg(data.sender, data.message, data.time);
+    } else {
+        notifyNewMessage();
+    }
+    });
+
+  </script>
+</body>
+</html>
