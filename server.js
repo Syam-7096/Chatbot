@@ -28,13 +28,17 @@ app.use(
 );
 
 
-// =============================
-// MongoDB Connection
-// (keep your connection string here)
 mongoose
-  .connect("mongodb+srv://chatbot_user:Chat-7096@chatbot-admin.eozun8v.mongodb.net/?appName=chatbot-admin")
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("MongoDB error:", err));
+
+// =============================
+// AUTHENTICATION (use env vars)
+const OWNER_CREDENTIALS = {
+  username: process.env.OWNER_USER,
+  password: process.env.OWNER_PASS,
+};
 
 // =============================
 // Schemas
@@ -65,13 +69,6 @@ function genId() {
 function formatTime(date) {
   return new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-
-// =============================
-// AUTHENTICATION (unchanged)
-const OWNER_CREDENTIALS = {
-  username: "admin",
-  password: "12345",
-};
 
 app.get("/login", (req, res) => {
   if (req.session.authenticated) return res.redirect("/owner.html");
